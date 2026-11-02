@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Présent ?</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #000; }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3.5rem; padding: env(safe-area-inset-top, 0) 1.5rem env(safe-area-inset-bottom, 0);
+    color: #d9d6cf; text-align: center;
+    font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  }
+  .consigne { max-width: 22rem; font-size: 1.25rem; line-height: 1.6; }
+  .consigne p { margin: 0 0 .9rem; }
+  .consigne .fin { color: #8d8a84; font-size: 1.05rem; }
+  button {
+    width: 7.5rem; height: 7.5rem; border-radius: 50%;
+    background: transparent; color: #d9d6cf; border: 1px solid #d9d6cf;
+    font: inherit; font-size: 1.15rem; cursor: pointer;
+    animation: respire 5s ease-in-out infinite;
+  }
+  button:focus-visible { outline: 2px solid #fff; outline-offset: 6px; }
+  button:active { background: #d9d6cf; color: #000; }
+  button[disabled] { animation: none; opacity: .35; cursor: default; }
+  .etat { min-height: 1.5rem; color: #8d8a84; font-size: 1rem; }
+  @keyframes respire { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { button { animation: none; } }
+</style>
+</head>
+<body>
+  <div class="consigne">
+    <p>Monte le son.</p>
+    <p class="fin">Au maximum si tu veux, au minimum si tu veux. Tout son est bienvenu.</p>
+  </div>
+  <button id="go" type="button">Présent</button>
+  <div class="etat" id="etat" aria-live="polite"></div>
+
+<script>
+/* ---------- RÉGLAGES ---------- */
+// Tes enregistrements, dans le dossier "audio" du dépôt GitHub.
+// Un son par scan : le compteur passe au suivant, puis recommence au début.
+const SONS = [
+  "audio/voix_1.m4a",
+  "audio/voix_2.m4a",
+  "audio/voix_3.m4a",
+  "audio/voix_4.m4a",
+  "audio/voix_5.m4a"
+];
+// Adresse de ta base Firebase Realtime Database (laisse vide pour tester :
+// le son est alors tiré au hasard).
+const DB_URL = "";
+// Un même téléphone qui recharge la page dans ce délai garde le même son (en minutes).
+const DELAI_MIN = 30;
+/* -------------------------------- */
+
+const bouton = document.getElementById("go");
+const etat = document.getElementById("etat");
+const dire = t => { etat.textContent = t; };
+
+function lire(cle) { try { return JSON.parse(localStorage.getItem(cle)); } catch (e) { return null; } }
+function ecrire(cle, v) { try { localStorage.setItem(cle, JSON.stringify(v)); } catch (e) {} }
+
+async function choisirIndex() {
+  const dernier = lire("dernierScan");
+  if (dernier && Date.now() - dernier.t < DELAI_MIN * 60000) return dernier.i;
+
+  let i;
+  if (DB_URL) {
+    try {
+      await fetch(DB_URL + "/scans.json", {
+        method: "PUT",
+        body: JSON.stringify({ ".sv": { increment: 1 } })
+      });
+      const n = await (await fetch(DB_URL + "/scans.json")).json();
+      i = (Number(n) - 1) % SONS.length;
+    } catch (e) { i = null; }
+  }
+  if (i === null || i === undefined) i = Math.floor(Math.random() * SONS.length);
+  ecrire("dernierScan", { i, t: Date.now() });
+  return i;
+}
+
+// Son de secours (si le fichier n'existe pas encore) : un souffle grave, différent selon l'index.
+function souffle(i) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = "sine"; o.frequency.value = 110 + i * 37;
+  g.gain.setValueAtTime(0, ctx.currentTime);
+  g.gain.linearRampToValueAtTime(.4, ctx.currentTime + 2);
+  g.gain.linearRampToValueAtTime(0, ctx.currentTime + 8);
+  o.connect(g).connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 8);
+}
+
+bouton.addEventListener("click", async () => {
+  bouton.disabled = true;
+  dire("");
+  const i = await choisirIndex();
+  const audio = new Audio(SONS[i]);
+  audio.addEventListener("error", () => souffle(i));
+  audio.addEventListener("ended", () => { bouton.disabled = false; });
+  try { await audio.play(); }
+  catch (e) { souffle(i); setTimeout(() => { bouton.disabled = false; }, 8000); }
+});
+</script>
+</body>
+</html>
